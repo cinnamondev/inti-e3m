@@ -1,0 +1,12 @@
+[package]
+name = "inti-e3m"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.48.0", features = ["full"] }
+tokio-util = "0.7.16"
+tokio-tungstenite = "*"
+tokio-serial = "5.4.5"
+thiserror = "2.0.12"
+futures-util = "0.3.31"
