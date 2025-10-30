@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 use std::cmp::PartialEq;
 use std::collections::VecDeque;
 use std::io;
@@ -13,11 +15,17 @@ use tokio::sync::RwLock;
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
+use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_util::sync::CancellationToken;
+use log::log;
 use crate::tcode_de::Action::MOVE;
 use crate::tcode_de::{process_linear_token, Action, LinearAction, LinearActionError, LinearModifier};
+use crate::tui::app::App;
 
 mod tcode_de;
+mod tui;
+mod websocket_client;
 
 const SHAFT_LENGTH: u32 = 240; // 240 mm max distance!
 const KEEPALIVE_WS: bool = false;
@@ -67,6 +75,20 @@ async fn ws_loop(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx:
     Ok(())
 }
 
+#[tokio::main]
+async fn main() -> color_eyre::Result<()> {
+    // Set max_log_level to Trace
+    tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
+    // Set default level for unknown targets to Trace
+    tui_logger::set_default_level(log::LevelFilter::Trace);
+    color_eyre::install()?;
+    let terminal = ratatui::init();
+    let result = App::new().run(terminal).await;
+    ratatui::restore();
+    result
+}
+
+/**
 #[tokio::main]
 async fn main() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<Command>(100);
@@ -121,23 +143,31 @@ async fn main() {
                     println!("Error while handling GCode: {}", e);
                 }
             }
-
         }
-        websocket.close(None).await;
+        websocket.close(Some(CloseFrame {
+            code: CloseCode::Normal,
+            reason: Default::default()
+        })).await;
+        dbg!("Closing!");
     });
 
     let io_tx = tx.clone();
-    tokio::select! {
-        _ = token.cancelled() => {}
-        _ = io_listener(io_tx) => { token.cancel() } // cancel token when io stops.
-    }
-}
+    let io_token = token.clone();
+    tokio::spawn(async move {
+        let r = io_listener(io_tx, io_token).await;
+        if let Err(e) = r {
+            println!("Error while listening! :( {}", e);
+        }
+    });
 
-async fn io_listener(tx: Sender<Command>) -> Result<(), SendError<Command>> {
+    token.cancelled().await;
+}
+*/
+async fn io_listener(tx: Sender<Command>, token: CancellationToken) -> Result<(), SendError<Command>> {
     while let Ok(n) = tokio::io::stdin().read_u8().await && !tx.is_closed() {
         match n as char {
             'S' => tx.send(Command::Halt).await?,
-            'X' => return Ok(()),
+            'X' => { token.cancel(); return Ok(()); },
             'H' | 'h' => tx.send(Command::Home).await?,
             _ => {}
         }
