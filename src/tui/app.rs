@@ -113,12 +113,19 @@ impl App {
                                 server.token.cancel();
                             }
                         } else  {
-                            self.server = Some(Server::start(self.config.clone()));
+                            self.server = Some(Server::start(self.config.clone(), self.events.sender.clone()));
                         }
                     }
                     AppEvent::Quit => self.quit(),
-                    AppEvent::Halt | AppEvent::Home => todo!(),
-                    AppEvent::GCode(_) => todo!(),
+                    AppEvent::Command(command) if let Some(s) = &self.server => {
+                        if !s.tx.is_closed() {
+                            if let Err(e) = s.tx.send(command).await {
+                                log::error!("Failure sending command to marlin. Error: \n {}", e)
+                            }
+                        }
+                    }
+                    AppEvent::GCode(_) => {},
+                    AppEvent::Command(_) => {},
                 },
             }
         }
@@ -172,7 +179,8 @@ impl App {
                 popup.entered_text.pop();
             }
             // normal controls
-            KeyCode::End | KeyCode::Char('h') => self.events.send(AppEvent::Halt),
+            KeyCode::Home => self.events.send(AppEvent::Command(Command::Home)),
+            KeyCode::End | KeyCode::Char('h') => self.events.send(AppEvent::Command(Command::Halt)),
             KeyCode::Esc | KeyCode::Char('q') => self.events.send(AppEvent::Quit),
             KeyCode::Char('c' | 'C') if key_event.modifiers == KeyModifiers::CONTROL => {
                 self.events.send(AppEvent::Quit)

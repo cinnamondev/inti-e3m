@@ -4,14 +4,17 @@ use futures::channel;
 use thiserror::Error;
 use tokio::io;
 use tokio::runtime::Runtime;
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_util::sync::CancellationToken;
 use crate::Command;
+use crate::tui::app::App;
 use crate::tui::config::Config;
+use crate::tui::event::{AppEvent, Event};
+use crate::usb::GCodeError;
 use crate::websocket::ClientError;
 
 #[derive(Debug,Error)]
@@ -21,10 +24,12 @@ pub enum ServerError {
     #[error(transparent)]
     Websocket(#[from] ClientError),
     #[error(transparent)]
-    Tokio(#[from] JoinError)
+    Tokio(#[from] JoinError),
+    #[error(transparent)]
+    Gcode(#[from] GCodeError)
 }
 
-async fn start_with_configs(channel: (Sender<Command>, Receiver<Command>), token: CancellationToken, config: Config) -> Result<(), ServerError> {
+async fn start_with_configs(channel: (Sender<Command>, Receiver<Command>), token: CancellationToken, config: Config, app_tx: UnboundedSender<Event>) -> Result<(), ServerError> {
     let (mut websocket, _) =
         connect_async(config.websocket_config.ws.as_str()).await
             .map_err(|e| ClientError::from(e))?;
@@ -37,7 +42,7 @@ async fn start_with_configs(channel: (Sender<Command>, Receiver<Command>), token
             log::info!("Server has been stopped (manually!)");
             Ok(())
         },
-        result = crate::usb::run_server(config.machine_config, rx) => result.map_err(ServerError::from),
+        result = crate::usb::run_server(config.machine_config, rx,app_tx) => result.map_err(ServerError::from),
         result = crate::websocket::run_client(config.websocket_config, &mut websocket, tx) => result.map_err(ServerError::from),
     };
     if let Err(e) = &r {
@@ -68,13 +73,13 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn start(config: Config) -> Self {
+    pub fn start(config: Config, app_tx: UnboundedSender<Event>) -> Self {
         let token = CancellationToken::new();
         let channel = tokio::sync::mpsc::channel::<Command>(100);
         Self {
             token: token.clone(),
             tx: channel.0.clone(),
-            handle: tokio::spawn(start_with_configs(channel, token, config))
+            handle: tokio::spawn(start_with_configs(channel, token, config, app_tx))
         }
     }
 

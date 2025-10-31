@@ -39,6 +39,14 @@ async fn intiface(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx
     while let Some(msg) = websocket.next().await {
         let msg = msg?;
         log::debug!("websocket received message: {:?}", msg);
+        if let Message::Binary(bytes) = msg {
+            let linear_action = tcode_de::process_linear_token(&bytes[..(bytes.len()-1)]);
+            if let Ok(action) = linear_action {
+                tx.send(Command::Movement(action)).await?;
+            } else if let Err(e) = linear_action { // if strict is not enabled silently ignore.
+                return Err(ClientError::LinearAction(e));
+            }
+        }
     }
     Ok(())
 }

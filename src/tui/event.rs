@@ -3,6 +3,7 @@ use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::event::Event as CrosstermEvent;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use crate::usb::Command;
 
 /// The frequency at which tick events are emitted.
 const TICK_FPS: f64 = 30.0;
@@ -33,10 +34,8 @@ pub enum Event {
 pub enum AppEvent {
     /// Quit the application.
     Quit,
-    /// Halt 'printer' immediately
-    Halt,
-    /// Send home command to 'printer'
-    Home,
+    /// printer command
+    Command(Command),
     /// Display GCode bar
     GCode(String),
     Server,
@@ -46,7 +45,7 @@ pub enum AppEvent {
 #[derive(Debug)]
 pub struct EventHandler {
     /// Event sender channel.
-    sender: mpsc::UnboundedSender<Event>,
+    pub sender: mpsc::UnboundedSender<Event>,
     /// Event receiver channel.
     receiver: mpsc::UnboundedReceiver<Event>,
 }

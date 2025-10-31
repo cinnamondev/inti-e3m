@@ -9,10 +9,9 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
 use tokio_util::sync::CancellationToken;
-use crate::tcode_de::Action::MOVE;
-use crate::tcode_de::{Action, LinearAction, LinearModifier};
 use crate::tui::app::App;
 use crate::tui::config::Config;
+use crate::usb::Command;
 
 mod tcode_de;
 mod tui;
@@ -20,39 +19,7 @@ mod websocket;
 mod usb;
 mod server;
 
-const SHAFT_LENGTH: u32 = 240; // 240 mm max distance!
-const KEEPALIVE_WS: bool = false;
-const CONTROL_C_IS_FATAL: bool = true; // HALT on control c!
 
-#[derive(Debug)]
-enum Command {
-    Movement(LinearAction),
-    Home,
-    Halt,
-}
-
-async fn gcode_loop(serial: &mut SerialStream, rx: &mut Receiver<Command>) -> io::Result<()> {
-    while let Some(command) = rx.recv().await {
-        let mut last_linear_action: Option<LinearAction> = None;
-        match command {
-            Command::Movement(action) => {
-                let ret =serial.write(
-                    &*create_gcode(&action, last_linear_action).unwrap()
-                ).await?;
-                last_linear_action = Some(action);
-            }
-            Command::Halt => {
-                serial.write_all(b"M112\n").await?;
-                serial.flush().await?;
-            },
-            Command::Home => {
-                serial.write_all(b"G28 X\n").await?;
-                serial.flush().await?; // ensure
-            },
-        }
-    }
-    Ok(())
-}
 /**
 async fn ws_loop(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx: Sender<Command>, strict: bool) -> Result<(), ClientError> {
     while let Some(packet) = websocket.next().await {
@@ -73,9 +40,9 @@ async fn ws_loop(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx:
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     // Set max_log_level to Trace
-    tui_logger::init_logger(log::LevelFilter::Debug).unwrap();
+    //tui_logger::init_logger(log::LevelFilter::Debug).unwrap();
     // Set default level for unknown targets to Trace
-    tui_logger::set_default_level(log::LevelFilter::Trace);
+    //tui_logger::set_default_level(log::LevelFilter::Trace);
     color_eyre::install()?;
     let terminal = ratatui::init();
     let result = App::using_config(Config::default()).run(terminal).await;
@@ -168,52 +135,5 @@ async fn io_listener(tx: Sender<Command>, token: CancellationToken) -> Result<()
         }
     }
     Ok(())
-}
-
-fn create_gcode(action: &LinearAction, last_action: Option<LinearAction>) -> Result<Vec<u8>, ()> {
-    let last_action = last_action.unwrap_or_else(|| LinearAction {
-        action: Action::MOVE,
-        id: 0,
-        magnitude: 0,
-        modifier: None,
-    });
-
-    if action.action != MOVE { return Err(()); }
-    // now lets make a gcode for it
-    let mut output = String::from("G1 X");
-    let mut distance;
-    if action.magnitude == 0 {
-        distance = 0f32;
-    } else {
-        let digits = action.magnitude.checked_ilog10().unwrap_or(0) + 1;
-        distance = SHAFT_LENGTH as f32 * (action.magnitude as f32 / 10f32.powi(digits as i32));
-    }
-
-    if distance > SHAFT_LENGTH as f32 { distance = SHAFT_LENGTH as f32; } // just.. double check
-    if distance < 0f32 { distance = 0f32; }
-    output.push_str(&format!("{:.2} ", distance));
-    // distance is in MM so speed is MM/h.ms -> MM/min
-    let feedrate = match action.modifier {
-        Some(LinearModifier::SPEED(mmPerHundredMs)) => {
-            if let Some(LinearModifier::SPEED(last)) = last_action.modifier && last == mmPerHundredMs{
-                String::new()
-            } else { format!("F{}\n", mmPerHundredMs*600) }
-        },
-        //Some(LinearModifier::SPEED(_)) => { String::from("F2000") } // limited speed ver.
-        Some(LinearModifier::TIME(ms)) => {
-            if let Some(LinearModifier::TIME(last)) = last_action.modifier && last == ms {
-                String::new()
-            } else {
-                let magnitude_diff = (action.magnitude.abs_diff(last_action.magnitude)); //
-                let digits = magnitude_diff.checked_ilog10().unwrap_or(0) + 1;
-                let speed = (SHAFT_LENGTH as f32 * (magnitude_diff as f32 / 10f32.powi(digits as i32))) / (ms as f32 / 60_000.00);
-                //if speed > 7000f32 { speed = 2000f32; } // if the speed goes haywire we start forcing it to slow.
-                format!("F{:.2}\n", speed)
-            }
-        }
-        None => "".to_string()
-    };
-    output.push_str(&feedrate);
-    Ok(output.as_bytes().to_vec())
 }
 

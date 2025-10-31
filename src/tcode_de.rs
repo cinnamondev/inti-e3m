@@ -1,26 +1,8 @@
 use std::str::Utf8Error;
 use thiserror::Error;
 use tokio_tungstenite::tungstenite::handshake::machine;
-#[derive(Debug, Eq, PartialEq,)]
-pub enum Action {
-    MOVE,
-    ROTATE,
-    VIBRATE,
-    AUXILLARY
-}
-#[derive(Debug)]
-pub enum LinearModifier {
-    TIME(u32),
-    SPEED(u32)
-}
+use crate::usb::{Action, LinearAction, LinearModifier};
 
-#[derive(Debug)]
-pub struct LinearAction {
-    pub action: Action,
-    pub id: u32,
-    pub magnitude: u32,
-    pub modifier: Option<LinearModifier>
-}
 #[derive(Error, Debug)]
 pub enum LinearActionError {
     #[error("Invalid ID `{0}` given!")]
