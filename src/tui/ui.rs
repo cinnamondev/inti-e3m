@@ -11,7 +11,7 @@ use crate::tui::app::App;
 use crate::tui::bar::{Bar, ServicesState};
 use crate::tui::popup::Popup;
 
-impl<'a> App<'a> {
+impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
         let layout = Layout::vertical([
             Constraint::Min(0),
@@ -51,7 +51,7 @@ impl<'a> App<'a> {
             .map(|c| Row::from(c))
             .collect::<Vec<Row>>();
         v.push(Row::new(["",
-            if !self.server_running { " Start Server " } else { " Stop Server " }
+            if !self.is_server_running() { " Start Server " } else { " Stop Server " }
         ]));
         let table = Table::new(
             v,

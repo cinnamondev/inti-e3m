@@ -1,12 +1,12 @@
 use std::fmt::Display;
 
 #[derive(Debug)]
-#[derive(Default)]
-pub struct Config<'a> {
-    pub machine_config: MachineConfig<'a>,
-    pub websocket_config: WebsocketConfig<'a>,
+#[derive(Default, Clone)]
+pub struct Config {
+    pub machine_config: MachineConfig,
+    pub websocket_config: WebsocketConfig,
 }
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub enum ServiceProvider {
     EXTOY,
     INTI,
@@ -17,32 +17,32 @@ impl Display for ServiceProvider {
         write!(f, "{:?}", self)
     }
 }
-#[derive(Debug)]
-pub struct WebsocketConfig<'a> {
+#[derive(Debug, Clone)]
+pub struct WebsocketConfig {
     pub provider: ServiceProvider,
-    pub ws: &'a str,
+    pub ws: String,
 }
 
-impl<'a> Default for WebsocketConfig<'a> {
-    fn default() -> WebsocketConfig<'a> {
+impl Default for WebsocketConfig {
+    fn default() -> WebsocketConfig {
         WebsocketConfig {
             provider: ServiceProvider::INTI,
-            ws: "wss://localhost:8080",
+            ws: "ws://localhost:54817".to_string(),
         }
     }
 }
-#[derive(Debug)]
-pub struct MachineConfig<'a> {
-    pub file: &'a str,
+#[derive(Debug, Clone)]
+pub struct MachineConfig {
+    pub file: String,
     pub throw: u32,
     pub max_movement: u32,
     pub max_acceleration: u32
 }
 
-impl<'a> Default for MachineConfig<'a> {
+impl Default for MachineConfig {
     fn default() -> Self {
         MachineConfig {
-            file: "/dev/ttyUSB0",
+            file: "/dev/ttyUSB0".to_string(),
             throw: 240,
             max_movement: 100,
             max_acceleration: 100000

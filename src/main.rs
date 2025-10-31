@@ -1,36 +1,30 @@
 #![feature(if_let_guard)]
 
 use std::cmp::PartialEq;
-use std::collections::VecDeque;
 use std::io;
-use std::sync::{Arc, Mutex};
-use futures_util::{future, pin_mut, SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
 use futures_util::stream::FusedStream;
-use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
-use tokio::sync::mpsc::error::{SendError, TryRecvError};
+use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tokio::sync::RwLock;
 use tokio_serial::{SerialPortBuilderExt, SerialStream};
-use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
-use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_util::sync::CancellationToken;
-use log::log;
 use crate::tcode_de::Action::MOVE;
-use crate::tcode_de::{process_linear_token, Action, LinearAction, LinearActionError, LinearModifier};
+use crate::tcode_de::{Action, LinearAction, LinearModifier};
 use crate::tui::app::App;
+use crate::tui::config::Config;
 
 mod tcode_de;
 mod tui;
-mod websocket_client;
+mod websocket;
+mod usb;
+mod server;
 
 const SHAFT_LENGTH: u32 = 240; // 240 mm max distance!
 const KEEPALIVE_WS: bool = false;
 const CONTROL_C_IS_FATAL: bool = true; // HALT on control c!
 
+#[derive(Debug)]
 enum Command {
     Movement(LinearAction),
     Home,
@@ -59,7 +53,7 @@ async fn gcode_loop(serial: &mut SerialStream, rx: &mut Receiver<Command>) -> io
     }
     Ok(())
 }
-
+/**
 async fn ws_loop(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx: Sender<Command>, strict: bool) -> Result<(), ClientError> {
     while let Some(packet) = websocket.next().await {
         let packet = packet?;
@@ -74,16 +68,17 @@ async fn ws_loop(websocket: &mut WebSocketStream<MaybeTlsStream<TcpStream>>, tx:
     }
     Ok(())
 }
+*/
 
 #[tokio::main]
 async fn main() -> color_eyre::Result<()> {
     // Set max_log_level to Trace
-    tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
+    tui_logger::init_logger(log::LevelFilter::Debug).unwrap();
     // Set default level for unknown targets to Trace
     tui_logger::set_default_level(log::LevelFilter::Trace);
     color_eyre::install()?;
     let terminal = ratatui::init();
-    let result = App::new().run(terminal).await;
+    let result = App::using_config(Config::default()).run(terminal).await;
     ratatui::restore();
     result
 }
@@ -173,15 +168,6 @@ async fn io_listener(tx: Sender<Command>, token: CancellationToken) -> Result<()
         }
     }
     Ok(())
-}
-#[derive(Debug,Error)]
-enum ClientError {
-    #[error(transparent)]
-    Tungstenite(#[from] tungstenite::error::Error),
-    #[error(transparent)]
-    LinearAction(#[from] LinearActionError),
-    #[error(transparent)]
-    Mspc(#[from] SendError<Command>)
 }
 
 fn create_gcode(action: &LinearAction, last_action: Option<LinearAction>) -> Result<Vec<u8>, ()> {

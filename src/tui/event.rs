@@ -23,7 +23,7 @@ pub enum Event {
     /// Application events.
     ///
     /// Use this event to emit custom events that are specific to your application.
-    App(AppEvent),
+    App(AppEvent)
 }
 
 /// Application events.
@@ -39,6 +39,7 @@ pub enum AppEvent {
     Home,
     /// Display GCode bar
     GCode(String),
+    Server,
 }
 
 /// Terminal event handler.

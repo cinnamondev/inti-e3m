@@ -8,69 +8,68 @@ use ratatui::{
 };
 use std::fmt::Debug;
 use log::{info, log};
+use tokio::sync::mpsc::Sender;
+use tokio::task;
+use tokio_util::sync::CancellationToken;
+use crate::Command;
+use crate::server::Server;
 use crate::tui::config::{Config, ServiceProvider};
 use crate::tui::config_option::{ConfigOptType, ConfigOption};
 
 /// Application.
 #[derive(Debug)]
-pub struct App<'a> {
+pub struct App {
     /// Is the application running?
     pub running: bool,
-    pub server_running: bool,
     pub popup_state: Option<PopupState>,
     pub table_state: TableState,
     pub items: Vec<ConfigOption>,
-    pub config: Config<'a>,
+    pub config: Config,
     /// Counter.
     /// Event handler.
     pub events: EventHandler,
-}
-
-impl<'a> App<'a> {
-    pub fn using_config(config: Config<'a>) -> Self {
-        todo!()
-    }
+    pub(crate) server: Option<Server>,
 }
 
 
-impl<'a> Default for App<'a> {
-    fn default() -> Self {
+impl App {
+    pub fn using_config(config: Config,) -> Self {
         Self {
-            server_running: false,
+            server: None,
             running: true,
             popup_state: None,
             items: vec![
                 ConfigOption::new(ConfigOptType::PopupInput,"Serial File",
-                                  "/dev/ttyUSB0",
+                                  config.machine_config.file.as_str(),
                                   |c| c.machine_config.file.to_string(),
                                   |c,s| { Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Movement distance",
-                                  "240 mm",
+                                  format!("{} mm", config.machine_config.max_movement).as_str(),
                                   |c| format!("{} mm", c.machine_config.max_movement),
                                   |c,s| { Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Max throw",
-                                  "100 mm",
+                                  format!("{} mm", config.machine_config.throw).as_str(),
                                   |c| format!("{} mm", c.machine_config.throw),
                                   |c,s| { Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Max acceleration",
-                                  "1000 mm/s",
+                                  format!("{} mm/s", config.machine_config.max_acceleration).as_str(),
                                   |c| format!("{} mm/s", c.machine_config.max_acceleration),
                                   |c,s| { Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Websocket URI",
-                                  "ws://localhost:8080",
+                                  config.websocket_config.ws.as_str(),
                                   |c| format!("{} mm/s", c.websocket_config.ws),
                                   |c,s| { Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::Switch,"Service Provider",
-                                  "INTI",
+                                  config.websocket_config.provider.to_string().as_str(),
                                   |c| c.websocket_config.provider.to_string(),
                                   |c,s| {
                                       c.websocket_config.provider = if c.websocket_config.provider == ServiceProvider::INTI {
-                                              ServiceProvider::EXTOY
+                                          ServiceProvider::EXTOY
                                       } else {
                                           ServiceProvider::INTI
                                       };
@@ -80,16 +79,21 @@ impl<'a> Default for App<'a> {
             ],
             table_state: TableState::default().with_selected(0).with_selected_column(1),
             events: EventHandler::new(),
-            config: Default::default(),
+            config
         }
     }
 }
 
-impl<'a> App<'a> {
-    /// Run the application's main loop.
-    pub fn new() -> Self {
-        Self::default()
+
+impl App {
+    pub(crate) fn is_server_running(&self) -> bool {
+        if let Some(server) = &self.server {
+            !server.handle.is_finished() && !server.tx.is_closed() && !server.token.is_cancelled()
+        } else {
+            false
+        }
     }
+    /// Run the application's main loop.
     pub async fn run(mut self, mut terminal: DefaultTerminal) -> color_eyre::Result<()> {
         while self.running {
             terminal.draw(|frame| self.draw(frame));
@@ -103,6 +107,15 @@ impl<'a> App<'a> {
                     _ => {}
                 },
                 Event::App(app_event) => match app_event {
+                    AppEvent::Server => {
+                        if self.is_server_running() {
+                            if let Some(server) = &self.server {
+                                server.token.cancel();
+                            }
+                        } else  {
+                            self.server = Some(Server::start(self.config.clone()));
+                        }
+                    }
                     AppEvent::Quit => self.quit(),
                     AppEvent::Halt | AppEvent::Home => todo!(),
                     AppEvent::GCode(_) => todo!(),
@@ -168,8 +181,8 @@ impl<'a> App<'a> {
             KeyCode::Char('s') => self.previous_row(),
             KeyCode::Enter if let Some(n) = self.table_state.selected() => { // open popup or submit popup info and see
                 if n == self.items.len() {
-                    self.server_running = !self.server_running;
-                } else if !self.server_running {
+                    self.events.send(AppEvent::Server);
+                } else if !self.is_server_running() {
                     let item: &mut ConfigOption = &mut self.items[n];
                     if item.typ == ConfigOptType::Switch { // the whole switch thing is SUCH a hack... idrc at this point though
                         item.handle(&mut self.config, "");
@@ -179,7 +192,7 @@ impl<'a> App<'a> {
                             header: item.label.clone(),
                             description: None,
                             entered_text: item.string_repr.clone(),
-                            data: DataType::STRING(10, 15),
+                            data: DataType::STRING(0, 30),
                         });
                     }
                 } else {

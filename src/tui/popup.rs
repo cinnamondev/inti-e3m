@@ -80,9 +80,4 @@ fn popup_area(area: Rect, width: u16, height: u16) -> Rect {
     area
 }
 
-impl<'a> App<'a> {
-    pub fn entry_popup(frame: &mut Frame, header: &str, label: &str, width: usize) {
-
-    }
-}
 
