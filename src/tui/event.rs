@@ -3,13 +3,15 @@ use futures::{FutureExt, StreamExt};
 use ratatui::crossterm::event::Event as CrosstermEvent;
 use std::time::Duration;
 use tokio::sync::mpsc;
-use crate::usb::Command;
+use crate::server::ServerError;
+use crate::usb::{Command, GCodeError};
+use crate::websocket::ClientError;
 
 /// The frequency at which tick events are emitted.
 const TICK_FPS: f64 = 30.0;
 
 /// Representation of all possible events.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Event {
     /// An event that is emitted on a regular schedule.
     ///
@@ -30,7 +32,7 @@ pub enum Event {
 /// Application events.
 ///
 /// You can extend this enum with your own custom events.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum AppEvent {
     /// Quit the application.
     Quit,
@@ -39,6 +41,13 @@ pub enum AppEvent {
     /// Display GCode bar
     GCode(String),
     Server,
+    ServerError(ErrorKind)
+}
+
+#[derive(Debug)]
+pub enum ErrorKind {
+    Websocket(String),
+    GCode(String)
 }
 
 /// Terminal event handler.

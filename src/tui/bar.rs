@@ -1,33 +1,44 @@
-use color_eyre::owo_colors::OwoColorize;
+use std::{error, io};
+use futures_util::future::err;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Constraint, Direction, Flex, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::prelude::Widget;
 use ratatui::style::{Color, Stylize};
-use ratatui::style::Color::Gray;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, StatefulWidget};
+use crate::usb::GCodeError;
+use crate::websocket::ClientError;
 
 pub struct Bar;
 
+#[derive(Debug, Clone)]
+pub enum Status {
+    NotRunning,
+    Stopped(String),
+    Okay
+}
+#[derive(Debug)]
 pub struct ServicesState {
-    pub websocket_status: bool,
-    pub usb_status: bool,
+    pub websocket_status: Status,
+    pub usb_status: Status,
     pub latest_gcode: String,
 }
 impl Bar {
     fn render_left(&self, area: Rect, buf: &mut Buffer, state: &mut ServicesState) {
         area.width;
-
         Line::from(vec![
             Span::from(" WebSocket "),
-            if state.websocket_status {
-                Span::from("Yay!").style((Color::Green, Color::LightGreen))
-            } else { Span::from("No :(").style((Color::Red, Color::LightRed)) },
-
+            match &state.websocket_status {
+                Status::NotRunning => Span::from("Inactive"),
+                Status::Stopped(error) => Span::from(error),
+                Status::Okay => Span::from("Tick")
+            },
             Span::from(" USB "),
-            if state.usb_status {
-                Span::from("Yay!").style((Color::Green, Color::LightGreen))
-            } else { Span::from("No :(").style((Color::Red, Color::LightRed)) }
+            match &state.usb_status {
+                Status::NotRunning => Span::from("Inactive"),
+                Status::Stopped(error) => Span::from(error),
+                Status::Okay => Span::from("Tick")
+            }
         ]).render(area, buf);
     }
     fn render_right(&self, area: Rect, buf: &mut Buffer, state: &mut ServicesState) {

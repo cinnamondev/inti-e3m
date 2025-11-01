@@ -1,26 +1,24 @@
 use ratatui::buffer::Buffer;
-use ratatui::Frame;
 use ratatui::layout::{Constraint, Flex, Layout, Rect};
 use ratatui::prelude::{Stylize, Widget};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, StatefulWidget, Wrap};
-use crate::tui::app::App;
 
 pub struct Popup;
 
 #[derive(Debug)]
 pub enum DataType {
-    INTEGER(i32,i32),
-    UNSIGNED_INTEGER(u32,u32),
-    STRING(usize, usize),
+    Integer(i32, i32),
+    UnsignedInteger(u32, u32),
+    String(usize, usize),
 }
 
 impl DataType {
     pub fn get_max_chars(&self) -> usize {
          match self {
-            DataType::INTEGER(lower, upper) => { upper.to_string().len() }
-            DataType::UNSIGNED_INTEGER(lower, upper) => { upper.to_string().len() }
-            DataType::STRING(min, max) => *max
+            DataType::Integer(lower, upper) => { upper.to_string().len() }
+            DataType::UnsignedInteger(lower, upper) => { upper.to_string().len() }
+            DataType::String(min, max) => *max
         }
     }
 }
@@ -37,7 +35,7 @@ impl StatefulWidget for Popup {
     type State = PopupState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let mut entry_width = state.data.get_max_chars();
+        let entry_width = state.data.get_max_chars();
         let entry_width= (entry_width + 6).min(20) as u16;
 
         let (paragraph, additional_height) = if let Some(description) = &state.description {

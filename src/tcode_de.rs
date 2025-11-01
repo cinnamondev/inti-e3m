@@ -1,6 +1,5 @@
 use std::str::Utf8Error;
 use thiserror::Error;
-use tokio_tungstenite::tungstenite::handshake::machine;
 use crate::usb::{Action, LinearAction, LinearModifier};
 
 #[derive(Error, Debug)]
@@ -18,7 +17,7 @@ pub enum LinearActionError {
 }
 /// assumes format of L<id><magnitude><I/T><magnitude>
 pub fn process_linear_token(bytes: &[u8]) -> Result<LinearAction, LinearActionError> {
-    if (bytes.len() < 3) { return Err(LinearActionError::CommandInvalid(bytes.to_vec())) }
+    if bytes.len() < 3 { return Err(LinearActionError::CommandInvalid(bytes.to_vec())) }
 
     let action = match bytes[0] as char {
         'l' | 'L' => Action::MOVE,

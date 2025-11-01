@@ -17,3 +17,5 @@ color-eyre = "0.6.3"
 tui-framework-experiment = "0.4.0"
 tui-logger = "0.17.4"
 log = "0.4.28"
+serde_json = "1.0.145"
+serde = { version = "1.0.228", features = ["derive"] }

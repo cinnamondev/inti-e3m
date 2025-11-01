@@ -1,6 +1,8 @@
+use core::error;
+use std::error::Error;
 use std::fmt::Debug;
 use ratatui::widgets::Row;
-use crate::tui::config::Config;
+use crate::config::Config;
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ConfigOptType {
@@ -12,7 +14,7 @@ pub struct ConfigOption {
     pub label: String,
     pub string_repr: String,
     pub update_str: Box<dyn Fn(&Config) -> String>,
-    pub function: Box<dyn FnMut(&mut Config, &str) -> Result<(), ConfigParseError>>,
+    pub function: Box<dyn FnMut(&mut Config, &str) -> Result<(), Box<dyn error::Error>>>,
 }
 
 impl Debug for ConfigOption {
@@ -28,7 +30,7 @@ pub enum ConfigParseError {
 }
 impl ConfigOption {
     pub fn new<F,T>(typ: ConfigOptType, label: &str, initial_repr: &str, string_getter: T, function: F) -> ConfigOption
-    where F: FnMut(&mut Config, &str) -> Result<(), ConfigParseError> + 'static, T: Fn(&Config) -> String + 'static  {
+    where F: FnMut(&mut Config, &str) -> Result<(), Box<dyn Error>> + 'static, T: Fn(&Config) -> String + 'static  {
         ConfigOption {
             typ,
             label: label.to_string(),
@@ -38,7 +40,7 @@ impl ConfigOption {
         }
     }
 
-    pub fn handle(&mut self, config: &mut Config, input_string: &str) -> Result<(), ConfigParseError> {
+    pub fn handle(&mut self, config: &mut Config, input_string: &str) -> Result<(), Box<dyn error::Error>> {
         let r = (self.function)(config, input_string);
         self.string_repr = (self.update_str)(config);
         r

@@ -1,15 +1,10 @@
-use std::cell::Cell;
-use crossterm::event::MouseButton;
-use ratatui::{buffer::Buffer, layout::{Alignment, Rect}, style::{Color, Stylize}, widgets::{Block, BorderType, Paragraph, Widget}, Frame};
-use ratatui::layout::{Constraint, Flex, Layout};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Row, Table};
-use tokio_tungstenite::tungstenite::protocol::frame;
-use tui_framework_experiment::Button;
-use tui_logger::TuiLoggerWidget;
 use crate::tui::app::App;
 use crate::tui::bar::{Bar, ServicesState};
 use crate::tui::popup::Popup;
+use ratatui::layout::{Constraint, Flex, Layout};
+use ratatui::widgets::{Row, Table};
+use ratatui::{layout::{Alignment, Rect}, style::Color, widgets::{Block, BorderType}, Frame};
+use tui_logger::TuiLoggerWidget;
 
 impl App {
     pub(crate) fn draw(&mut self, frame: &mut Frame) {
@@ -26,11 +21,7 @@ impl App {
 
         let [config, log] = Layout::horizontal([Constraint::Length(60), Constraint::Min(10)]).margin(2).flex(Flex::Center).areas(main);
         self.render_table(frame,config);
-        frame.render_stateful_widget(Bar,bar,&mut ServicesState {
-            websocket_status: true,
-            usb_status: true,
-            latest_gcode: String::new()
-        });
+        frame.render_stateful_widget(Bar, bar, &mut self.services_state);
 
         frame.render_widget(
             TuiLoggerWidget::default()

@@ -1,26 +1,21 @@
 // its only sort of a server... but wrapping this into one made sense.
 
-use futures::channel;
-use thiserror::Error;
-use tokio::io;
-use tokio::runtime::Runtime;
-use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
-use tokio::task::{JoinError, JoinHandle};
-use tokio_tungstenite::connect_async;
-use tokio_tungstenite::tungstenite::protocol::CloseFrame;
-use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
-use tokio_util::sync::CancellationToken;
-use crate::Command;
-use crate::tui::app::App;
-use crate::tui::config::Config;
-use crate::tui::event::{AppEvent, Event};
+use color_eyre::eyre::private::kind::TraitKind;
+use ratatui::prelude::Span;
+use crate::config::{Config, ServiceProvider};
+use crate::tui::event::{AppEvent, ErrorKind, Event};
 use crate::usb::GCodeError;
 use crate::websocket::ClientError;
+use crate::Command;
+use thiserror::Error;
+use tokio::io;
+use tokio::sync::mpsc::{Receiver, Sender, UnboundedSender};
+use tokio::task::{JoinError, JoinHandle};
+use tokio_util::sync::CancellationToken;
+use crate::tui::bar::Status;
 
-#[derive(Debug,Error)]
+#[derive(Debug, Error)]
 pub enum ServerError {
-    #[error(transparent)]
-    Io(#[from] io::Error),
     #[error(transparent)]
     Websocket(#[from] ClientError),
     #[error(transparent)]
@@ -30,36 +25,33 @@ pub enum ServerError {
 }
 
 async fn start_with_configs(channel: (Sender<Command>, Receiver<Command>), token: CancellationToken, config: Config, app_tx: UnboundedSender<Event>) -> Result<(), ServerError> {
-    let (mut websocket, _) =
-        connect_async(config.websocket_config.ws.as_str()).await
-            .map_err(|e| ClientError::from(e))?;
-
     let (tx, rx) = channel;
     let token = token.clone();
 
     let mut r = tokio::select! {
-        _ = token.cancelled() => {
-            log::info!("Server has been stopped (manually!)");
-            Ok(())
-        },
-        result = crate::usb::run_server(config.machine_config, rx,app_tx) => result.map_err(ServerError::from),
-        result = crate::websocket::run_client(config.websocket_config, &mut websocket, tx) => result.map_err(ServerError::from),
+        result = crate::usb::run_server(config.machine_config, rx, app_tx.clone() ,token.clone()) => result.map_err(ServerError::from),
+        result = crate::websocket::intiface(&config.websocket_config, tx.clone(), token.clone()),
+            if config.websocket_config.provider == ServiceProvider::INTI => result.map_err(ServerError::from),
+        result = crate::websocket::extoys(&config.websocket_config, tx.clone(), token.clone()),
+            if config.websocket_config.provider == ServiceProvider::EXTOY => result.map_err(ServerError::from)
     };
+    if token.is_cancelled() {
+        log::info!("Server closed manually!");
+    }
     if let Err(e) = &r {
         token.cancel();
         log::error!("{}", e);
-    }
-    // do cleanup
-    let close_response = websocket.close(Some(CloseFrame {
-        code: CloseCode::Normal,
-        reason: Default::default()
-    })).await;
 
-    if let Err(e) = &close_response {
-        token.cancel();
-        log::error!("Couldn't send close packet to websocket! :(");
-        log::error!("{}", e);
-        if r.is_ok() { r = close_response.map_err(ClientError::from).map_err(ServerError::from); }
+        let kind = match &e {
+            ServerError::Websocket(ClientError::Io(e)) if e.kind() == io::ErrorKind::UnexpectedEof => ErrorKind::Websocket("Invalid URI".to_string()),
+            ServerError::Websocket(we) =>  ErrorKind::Websocket("Error".to_string()),
+            //ServerError::Gcode(GCodeError::Io(e)) if e.kind() == io::ErrorKind::ConnectionAborted => ErrorKind::GCode("Not connected!".to_string()),
+            ServerError::Gcode(GCodeError::Io(e)) if e.kind() == io::ErrorKind::PermissionDenied => ErrorKind::GCode("No permission!".to_string()),
+            ServerError::Gcode(GCodeError::Io(e)) if e.kind() == io::ErrorKind::NotFound => ErrorKind::GCode("Not connected!".to_string()),
+            ServerError::Gcode(ge) => ErrorKind::GCode("Error".to_string()),
+            ServerError::Tokio(_) => ErrorKind::Websocket("Not connected!".to_string()) // unlikely and if we do its a bigger problem
+        };
+        app_tx.send(Event::App(AppEvent::ServerError(kind))).expect("app error channel went wrong, you're on your own.");
     }
 
     r

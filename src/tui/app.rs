@@ -1,20 +1,17 @@
-use std::cmp::PartialEq;
-use crate::tui::event::{AppEvent, Event, EventHandler};
+use crate::config::{Config, ServiceProvider};
+use crate::server::Server;
+use crate::tui::config_option::{ConfigOptType, ConfigOption};
+use crate::tui::event::{AppEvent, ErrorKind, Event, EventHandler};
 use crate::tui::popup::{DataType, PopupState};
+use crate::Command;
+use log::{info};
 use ratatui::widgets::TableState;
 use ratatui::{
     crossterm::event::{KeyCode, KeyEvent, KeyModifiers},
     DefaultTerminal,
 };
-use std::fmt::Debug;
-use log::{info, log};
-use tokio::sync::mpsc::Sender;
-use tokio::task;
-use tokio_util::sync::CancellationToken;
-use crate::Command;
-use crate::server::Server;
-use crate::tui::config::{Config, ServiceProvider};
-use crate::tui::config_option::{ConfigOptType, ConfigOption};
+use crate::tui::bar::ServicesState;
+use crate::tui::bar::Status::{NotRunning, Okay, Stopped};
 
 /// Application.
 #[derive(Debug)]
@@ -29,6 +26,7 @@ pub struct App {
     /// Event handler.
     pub events: EventHandler,
     pub(crate) server: Option<Server>,
+    pub services_state: ServicesState,
 }
 
 
@@ -42,27 +40,27 @@ impl App {
                 ConfigOption::new(ConfigOptType::PopupInput,"Serial File",
                                   config.machine_config.file.as_str(),
                                   |c| c.machine_config.file.to_string(),
-                                  |c,s| { Ok(()) }
+                                  |c,s| { c.machine_config.file = s.to_string(); Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Movement distance",
                                   format!("{} mm", config.machine_config.max_movement).as_str(),
                                   |c| format!("{} mm", c.machine_config.max_movement),
-                                  |c,s| { Ok(()) }
+                                  |c,s| { c.machine_config.max_movement = s.parse()?; Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Max throw",
                                   format!("{} mm", config.machine_config.throw).as_str(),
                                   |c| format!("{} mm", c.machine_config.throw),
-                                  |c,s| { Ok(()) }
+                                  |c,s| { c.machine_config.throw = s.parse()?; Ok(())}
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Max acceleration",
                                   format!("{} mm/s", config.machine_config.max_acceleration).as_str(),
                                   |c| format!("{} mm/s", c.machine_config.max_acceleration),
-                                  |c,s| { Ok(()) }
+                                  |c,s| { c.machine_config.max_acceleration = s.parse()?; Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::PopupInput,"Websocket URI",
                                   config.websocket_config.ws.as_str(),
                                   |c| format!("{} mm/s", c.websocket_config.ws),
-                                  |c,s| { Ok(()) }
+                                  |c,s| { c.websocket_config.ws = s.to_string(); Ok(()) }
                 ),
                 ConfigOption::new(ConfigOptType::Switch,"Service Provider",
                                   config.websocket_config.provider.to_string().as_str(),
@@ -79,7 +77,12 @@ impl App {
             ],
             table_state: TableState::default().with_selected(0).with_selected_column(1),
             events: EventHandler::new(),
-            config
+            config,
+            services_state: ServicesState {
+                websocket_status: NotRunning,
+                usb_status: NotRunning,
+                latest_gcode: "".to_string(),
+            },
         }
     }
 }
@@ -111,8 +114,13 @@ impl App {
                         if self.is_server_running() {
                             if let Some(server) = &self.server {
                                 server.token.cancel();
+                                self.server = None;
+                                self.services_state.websocket_status = NotRunning;
+                                self.services_state.usb_status = NotRunning;
                             }
                         } else  {
+                            self.services_state.websocket_status = Okay;
+                            self.services_state.usb_status = Okay;
                             self.server = Some(Server::start(self.config.clone(), self.events.sender.clone()));
                         }
                     }
@@ -124,8 +132,14 @@ impl App {
                             }
                         }
                     }
-                    AppEvent::GCode(_) => {},
+                    AppEvent::GCode(gcode) => self.services_state.latest_gcode = gcode,
                     AppEvent::Command(_) => {},
+                    AppEvent::ServerError(e) => {
+                        match e {
+                            ErrorKind::Websocket(e) => self.services_state.websocket_status = Stopped(e),
+                            ErrorKind::GCode(e) => self.services_state.usb_status = Stopped(e),
+                        }
+                    },
                 },
             }
         }
@@ -200,7 +214,7 @@ impl App {
                             header: item.label.clone(),
                             description: None,
                             entered_text: item.string_repr.clone(),
-                            data: DataType::STRING(0, 30),
+                            data: DataType::String(0, 30),
                         });
                     }
                 } else {
@@ -217,7 +231,11 @@ impl App {
     ///
     /// The tick event is where you can update the state of your application with any logic that
     /// needs to be updated at a fixed frame rate. E.g. polling a server, updating an animation.
-    pub fn tick(&self) {}
+    pub fn tick(&self) {
+        if self.is_server_running() {
+            // update 
+        }
+    }
 
     /// Set running to false to quit the application.
     pub fn quit(&mut self) {

@@ -1,13 +1,10 @@
-use ratatui::text::ToLine;
 use thiserror::Error;
-use tokio::{io, task};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc::{Receiver, UnboundedSender};
-use tokio::task::JoinHandle;
-use tokio_serial::{SerialPort, SerialPortBuilderExt, SerialStream};
+use tokio_serial::{SerialPortBuilderExt};
 use tokio_util::sync::CancellationToken;
-use crate::tui::config::MachineConfig;
-use crate::tui::event::{AppEvent, Event, EventHandler};
+use crate::config::MachineConfig;
+use crate::tui::event::{AppEvent, Event};
 use crate::usb::Action::MOVE;
 use crate::usb::GCodeError::UnsupportedMovement;
 
@@ -47,28 +44,32 @@ pub enum GCodeError {
     #[error("Unsupported movement!")]
     UnsupportedMovement(Action),
 }
-pub async fn run_server(config: MachineConfig, mut rx: Receiver<Command>, event_handler: UnboundedSender<Event>) -> Result<(), GCodeError> {
+pub async fn run_server(config: MachineConfig, mut rx: Receiver<Command>, event_handler: UnboundedSender<Event>, token: CancellationToken) -> Result<(), GCodeError> {
     let mut serial = tokio_serial::new(config.file.clone(), 250000).open_native_async()?;
-    while let Some(command) = rx.recv().await {
-        let command: Command = command;
+
+    serial.write_all(b"G28 X\n").await?;
+    serial.flush().await?; // ensure
+    let _ = event_handler.send(Event::App(AppEvent::GCode("G28 X".to_string())));
+
+    while !token.is_cancelled() && let Some(command) = &rx.recv().await {
         log::debug!("{:?}", command);
         let mut last_linear_action: Option<LinearAction> = None;
         match command {
             Command::Movement(action) => {
                 let gcode = &*create_gcode(&config, &action, last_linear_action)?;
                 let ret =serial.write(gcode).await?;
-                last_linear_action = Some(action);
-                event_handler.send(Event::App(AppEvent::GCode(format!("{:?}", gcode))));
+                last_linear_action = Some(action.clone());
+                let _ =event_handler.send(Event::App(AppEvent::GCode(format!("{:?}", gcode))));
             }
             Command::Halt => {
                 serial.write_all(b"M112\n").await?;
                 serial.flush().await?;
-                event_handler.send(Event::App(AppEvent::GCode("M112".to_string())));
+                let _ = event_handler.send(Event::App(AppEvent::GCode("M112".to_string())));
             },
             Command::Home => {
                 serial.write_all(b"G28 X\n").await?;
                 serial.flush().await?; // ensure
-                event_handler.send(Event::App(AppEvent::GCode("G28 X".to_string())));
+                let _ = event_handler.send(Event::App(AppEvent::GCode("G28 X".to_string())));
             },
         }
     }
@@ -102,14 +103,20 @@ fn create_gcode(config: &MachineConfig, action: &LinearAction, last_action: Opti
                 String::new() // same as previous we dont need to redo.
             } else {
                 let previous_distance = last_action.magnitude_to_distance(config.max_movement);
-                let speed = ((distance-previous_distance).abs())/ (ms as f32 / 60_000.00);
-                //if speed > 7000f32 { speed = 2000f32; } // if the speed goes haywire we start forcing it to slow.
-                format!("F{:.2}\n", speed)
+                let d= ((distance-previous_distance).abs());
+                if (d > 1f32) {
+                    let speed = d / (ms as f32 / 60_000.00);
+                    //if speed > 7000f32 { speed = 2000f32; } // if the speed goes haywire we start forcing it to slow.
+                    format!("F{:.2}\n", speed)
+                } else {
+                    String::new() // use previous speed if really close.
+                }
             }
         }
         None => "".to_string()
     };
     output.push_str(&feedrate);
+    log::info!("{}", output);
     Ok(output.as_bytes().to_vec())
 }
 
@@ -120,6 +127,6 @@ impl LinearAction {
         let digits = self.magnitude.ilog10() + 1;
         let distance = max_distance as f32 * (self.magnitude as f32 / 10f32.powi(digits as i32));
 
-        distance.max(max_distance as f32)
+        distance.min(max_distance as f32)
     }
 }
