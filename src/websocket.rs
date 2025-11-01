@@ -50,7 +50,7 @@ pub(crate) async fn extoys(config: &WebsocketConfig, tx: Sender<Command>, token:
                 let BASE_F = 10;
                 let ACTUAL_F = 50;
                 if BASE_F != ACTUAL_F {
-                    duration = (duration as f32 * (BASE_F as f32 / ACTUAL_F as f32)) as u8;
+                    duration = (duration as f32 * (BASE_F as f32 / ACTUAL_F as f32)) as u32;
                 }
                 log::debug!("Received extoy packet: {:?}", packet);
                 let action = LinearAction {
